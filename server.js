@@ -133,13 +133,13 @@ app.get('/api/perfume/genero/:genero', async (req, res) => {
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
-app.get('/api/marcas', async (req, res) => {
+app.get('/api/selecciones', async (req, res) => {
     try {
-        console.log("Petición recibida para obtener todas las marcas");
-        const { rows } = await pool.query('SELECT * FROM marcas');
+        console.log("Petición recibida para obtener todas las selecciones");
+        const { rows } = await pool.query('SELECT * FROM selecciones');
         res.json(rows);
     } catch (error) {
-        console.error('Error al obtener marcas:', error);
+        console.error('Error al obtener selecciones:', error);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
    
@@ -195,13 +195,13 @@ app.delete('/api/perfume/:id', async (req, res) => {
 // api registro y login
 app.post('/api/auth/register', async (req, res) => {
 
-    const { nombre, apellidos,telefono,contraseña} = req.body;
+    const { nombre, apellidos,telefono,contraseña,correo,seleccion} = req.body;
     const hashedPassword = await bcrypt.hash(contraseña, saltRounds);
     try {
         console.log("Petición recibida para registrar un nuevo usuario");
         const { rows } = await pool.query(
-            'INSERT INTO usuarios (nombre, apellidos, telefono,contraseña) VALUES ($1, $2, $3,$4) RETURNING *',
-            [nombre, apellidos,telefono,hashedPassword]
+            'INSERT INTO usuarios (nombre, apellidos,correo, telf,contraseña,seleccion) VALUES ($1, $2, $3,$4,$5,$6) RETURNING *',
+            [nombre, apellidos,correo,telefono,hashedPassword,seleccion]
         );
         res.status(201).json(rows[0]);
     } catch (error) {
@@ -211,12 +211,12 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 app.post('/api/auth/login', async (req, res) => {
-    const { telefono, contraseña } = req.body;
+    const { correo, contraseña } = req.body;
     try {
-        // 1. Buscamos al usuario solo por su teléfono (que debe ser único)
+        // 1. Buscamos al usuario solo por su correo (que debe ser único)
         const { rows } = await pool.query(
-            'SELECT * FROM usuarios WHERE telefono = $1 ',
-            [telefono]
+            'SELECT * FROM usuarios WHERE correo = $1 ',
+            [correo]
         );
 
         if (rows.length === 0) {
@@ -236,7 +236,7 @@ app.post('/api/auth/login', async (req, res) => {
         // 3. Si la contraseña es válida, generamos el token
         // (Aquí corregimos el segundo error)
         const token = jwt.sign(
-            { userId: usuario.idusuario, admin: usuario.admin }, // Payload: info útil del usuario
+            { userId: usuario.idUser, admin: usuario.admin }, // Payload: info útil del usuario
             process.env.JWT_SECRET,
             { expiresIn: '1h' }
         );
@@ -245,10 +245,10 @@ app.post('/api/auth/login', async (req, res) => {
         res.json({
             token,
             user: {
-                id: usuario.idusuario,
+                id: usuario.idUser,
                 nombre: usuario.nombre,
                 apellidos: usuario.apellidos,
-                telefono: usuario.telefono,
+                telf: usuario.telf,
                 admin: usuario.admin
             }
         });
@@ -262,7 +262,7 @@ app.get('/api/auth/perfil', verificarToken, async (req, res) => {
     try {
         console.log(`Petición recibida para obtener el perfil del usuario con ID: ${req.user.userId}`);
         const { rows } = await pool.query(
-            'SELECT idusuario, nombre, apellidos, telefono FROM usuarios WHERE idusuario = $1',
+            'SELECT "idUser", nombre, apellidos, telf FROM usuarios WHERE "idUser" = $1',
             [req.user.userId]
         );
         if (rows.length === 0) {
@@ -287,9 +287,9 @@ app.put('/api/auth/perfil', verificarToken, async (req, res) => {
 
         const query = `
             UPDATE usuarios 
-            SET nombre = $1, apellidos = $2, telefono = $3, contraseña = COALESCE($4, contraseña)
-            WHERE idusuario = $5 
-            RETURNING idusuario, nombre, apellidos, telefono
+            SET nombre = $1, apellidos = $2, telf = $3, contraseña = COALESCE($4, contraseña)
+            WHERE "idUser" = $5 
+            RETURNING "idUser", nombre, apellidos, telf
         `;
         const values = [nombre, apellido, telefono, hashedPassword, req.user.userId];
         
