@@ -10,6 +10,12 @@ const saltRounds = 10;
 const app = express();
 const port = process.env.PORT || 3001;
 
+// Configuración de CORS para aceptar solo el FRONTEND_URL
+const corsOptions = {
+    origin: process.env.FRONTEND_URL,
+    credentials: true
+};
+
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: {
@@ -28,7 +34,8 @@ pool.connect((err, client, release) => {
     console.log('¡Conexión a la base de datos verificada exitosamente! Hora de la DB:', result.rows[0].now);
   });
 });
-app.use(cors());
+app.use(cors(corsOptions));
+
 app.use(express.json());
 
 // --- MIDDLEWARE DE AUTENTICACIÓN ---
