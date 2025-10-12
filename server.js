@@ -70,131 +70,18 @@ app.get('/', (req, res) => {
 app.get('/api/busqueda', async (req, res) => {
     const { q } = req.query; // Obtenemos el parámetro de búsqueda
     try {
-        console.log(`Petición recibida para buscar perfumes con el término: ${q}`);
+        console.log(`Petición recibida para buscar productos con el término: ${q}`);
         const query = `
-            SELECT p.*, m.nombre AS marcaP
-            FROM perfume AS p
-            INNER JOIN marcas AS m ON p.marca = m.idmarca
-            WHERE p.activo = true AND (p.nombre ILIKE $1 OR m.nombre ILIKE $1)
+            SELECT p.*, s."Nombre" AS seleccionNombre 
+            FROM producto AS p
+            LEFT JOIN selecciones AS s ON p.seleccion = s."idSelec"
+            WHERE p.activo = true AND (p.nombre ILIKE $1 OR s."Nombre" ILIKE $1)
+            ORDER BY p."idProduct" DESC
         `;
         const { rows } = await pool.query(query, [`%${q}%`]);
         res.json(rows);
     } catch (error) {
-        console.error('Error al buscar perfumes:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
-
-// Ruta para obtener todos los perfumes
-app.get('/api/perfumes', async (req, res) => {
-    try {
-        console.log("Petición recibida en /api/perfume");
-        const query = `
-            SELECT p.*, m.nombre AS marcaP
-            FROM perfume AS p
-            INNER JOIN marcas AS m ON p.marca = m.idmarca
-            WHERE p.activo = true
-        `;
-        const { rows } = await pool.query(query);
-        res.json(rows);
-    } catch (error) {
-        console.error('Error al obtener perfumes:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
-
-app.get('/api/perfume/:id', async (req, res) => {
-    const { id } = req.params;
-    try {
-        console.log(`Petición recibida para obtener el perfume con ID: ${id}`);
-        const query = `
-            SELECT p.*, m.nombre AS marcaP
-            FROM perfume AS p
-            INNER JOIN marcas AS m ON p.marca = m.idmarca
-            WHERE p.idperfume = $1
-        `;
-        const { rows } = await pool.query(query, [id]);
-        if (rows.length === 0) {
-            return res.status(404).json({ error: 'perfume no encontrado' });
-        }
-        res.json(rows[0]);
-    } catch (error) {
-        console.error('Error al obtener el perfume:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
-app.get('/api/perfume/genero/:genero', async (req, res) => {
-    const { genero } = req.params;
-    try {
-        console.log(`Petición recibida para obtener perfumes de género: ${genero}`);
-        const query = `
-            SELECT p.*, m.nombre AS marcaP
-            FROM perfume AS p
-            INNER JOIN marcas AS m ON p.marca = m.idmarca
-            WHERE p.genero = $1 AND p.activo = true
-        `;
-        const { rows } = await pool.query(query, [genero]);
-        res.json(rows); // Se devuelve un array vacío si no hay resultados, no un error 404
-    } catch (error) {
-        console.error('Error al obtener perfumes por género:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
-app.get('/api/selecciones', async (req, res) => {
-    try {
-        console.log("Petición recibida para obtener todas las selecciones");
-        const { rows } = await pool.query('SELECT * FROM selecciones');
-        res.json(rows);
-    } catch (error) {
-        console.error('Error al obtener selecciones:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-   
-});
-app.post('/api/perfume', async (req, res) => {
-    const { nombre, marca, top, descripcion,clima,genero } = req.body;
-    try {
-        console.log("Petición recibida para crear un nuevo perfume");
-        const { rows } = await pool.query(
-            'INSERT INTO perfume (nombre, marca, top, descripcion,clima,genero) VALUES ($1, $2, $3, $4,$5,$6) RETURNING *',
-            [nombre, marca, top, descripcion,clima,genero]
-        );
-        res.status(201).json(rows[0]);
-    } catch (error) {
-        console.error('Error al crear el perfume:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
-app.put('/api/perfume/:id', async (req, res) => {
-    const { id } = req.params;
-    const { nombre, marca, top, descripcion,clima,genero} = req.body;
-    try {
-        console.log(`Petición recibida para actualizar el perfume con ID: ${id}`);
-        const { rows } = await pool.query(
-            'UPDATE perfume SET nombre = $1, marca = $2, top = $3, descripcion = $4,clima=$5,genero=$6 WHERE idperfume = $7 RETURNING *',
-            [nombre, marca, top, descripcion,clima,genero, id]
-        );
-        if (rows.length === 0) {
-            return res.status(404).json({ error: 'perfume no encontrado' });
-        }
-        res.json(rows[0]);
-    } catch (error) {
-        console.error('Error al actualizar el perfume:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
-
-app.delete('/api/perfume/:id', async (req, res) => {
-    const { id } = req.params;
-    try {
-        console.log(`Petición recibida para eliminar el perfume con ID: ${id}`);
-        const { rowCount } = await pool.query('UPDATE perfume SET activo=false WHERE idperfume = $1', [id]);
-        if (rowCount === 0) {
-            return res.status(404).json({ error: 'perfume no encontrado' });
-        }
-        res.status(204).send(); // No content
-    } catch (error) {
-        console.error('Error al eliminar el perfume:', error);
+        console.error('Error al buscar productos:', error);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -314,7 +201,14 @@ app.get('/api/pedidos/mis-pedidos', async (req, res) => {
     const { userId } = req.query; // Asumiendo que el ID del usuario se pasa como parámetro de consulta
     try {
         console.log(`Petición recibida para obtener los pedidos del usuario con ID: ${userId}`);
-        const { rows } = await pool.query('SELECT * FROM pedidos WHERE usuario_id = $1 AND estado!="cancelado" ', [userId]);
+        const query = `
+            SELECT p.*, pr.nombre AS productoNombre 
+            FROM pedidos AS p
+            LEFT JOIN producto AS pr ON p.producto = pr.idProduct
+            WHERE p.comprador = $1 AND p.estado != 'cancelado'
+            ORDER BY p.idPedido DESC
+        `;
+        const { rows } = await pool.query(query, [userId]);
         if (rows.length === 0) {
             return res.status(404).json({ error: 'No se encontraron pedidos para este usuario' });
         }
@@ -326,73 +220,13 @@ app.get('/api/pedidos/mis-pedidos', async (req, res) => {
 });
 
 
-app.post('/api/pedidos', async (req, res) => {
- 
-    const productosDelPedido = req.body;
-    
-    if (!Array.isArray(productosDelPedido) || productosDelPedido.length === 0) {
-        return res.status(400).json({ error: 'El cuerpo de la solicitud debe ser un array de productos y no puede estar vacío.' });
-    }
-
-    const client = await pool.connect(); // Obtenemos un cliente de la pool de conexiones
-
-    try {
-        // 2. Iniciamos una TRANSACCIÓN.
-        await client.query('BEGIN');
-
-        console.log("Procesando un nuevo pedido con ID temporal:", productosDelPedido[0].idpedidotemp);
-        console.log("Productos del pedido:", productosDelPedido);
-
-
-        const filasInsertadas = [];
-
-        // 3. Usamos un bucle for...of para poder usar await dentro.
-        for (const producto of productosDelPedido) {
-            const { idperfume, cantidad, fecha, idpedidotemp } = producto;
-            
-            // Validamos que cada producto tenga los campos necesarios
-            if (!idperfume || !cantidad || !fecha || !idpedidotemp) {
-                throw new Error('Cada producto debe contener idperfume, cantidad, fecha y idpedidotemp.');
-            }
-
-            const query = `
-                INSERT INTO pedido (idperfume, idusuario, cantidad, fecha, "idPedidoTemp") 
-                VALUES ($1, NULL, $2, $3, $4) 
-                RETURNING *`; // RETURNING * nos devuelve la fila completa que se insertó
-
-            const values = [idperfume, cantidad, fecha, idpedidotemp];
-            
-            const { rows } = await client.query(query, values);
-            
-            // 4. Guardamos cada fila insertada para devolverla al final.
-            filasInsertadas.push(rows[0]);
-        }
-
-        // 5. Si el bucle se completó sin errores, confirmamos la transacción.
-        await client.query('COMMIT');
-        
-        // 6. Enviamos de vuelta el array con todos los productos insertados.
-        console.log("Pedido insertado correctamente en la BD.");
-        res.status(201).json(filasInsertadas);
-
-    } catch (error) {
-        // 7. Si ocurre CUALQUIER error, revertimos la transacción.
-        await client.query('ROLLBACK');
-        console.error('Error al procesar el pedido, se hizo ROLLBACK:', error.message);
-        res.status(500).json({ error: 'Error interno del servidor al procesar el pedido.', details: error.message });
-    } finally {
-        // 8. Liberamos el cliente para que pueda ser usado por otra petición.
-        client.release();
-    }
-});
-
 app.put('/api/pedidos/:id', async (req, res) => {
     const { id } = req.params;
-    const { estado,cantidad } = req.body; // Asegúrate de que el cuerpo de la solicitud tenga el campo 'estado'
+    const { estado, cantidad } = req.body; // Asegúrate de que el cuerpo de la solicitud tenga el campo 'estado'
     try {
         console.log(`Petición recibida para actualizar el pedido con ID: ${id}`);
         const { rows } = await pool.query(
-            'UPDATE pedidos SET estado = $1, cantidad=$2 WHERE idpedido = $3 RETURNING *',
+            'UPDATE pedidos SET estado = $1, cantidad = $2 WHERE idPedido = $3 RETURNING *',
             [estado, cantidad, id]
         );
         if (rows.length === 0) {
@@ -405,115 +239,349 @@ app.put('/api/pedidos/:id', async (req, res) => {
     }
 });
 
-// pedidos admin
-app.get('/api/pedidos/admin/todos-pedidos', async (req, res) => {
+
+
+// Endpoint para guardar URLs de multimedia (imágenes/videos) en la base de datos
+app.post('/api/multimedia', verificarToken, esAdmin, async (req, res) => {
+    const { producto, urls } = req.body; // urls será un array de objetos con {url, tipo}
+    
+    if (!producto || !urls || !Array.isArray(urls)) {
+        return res.status(400).json({ error: 'Producto y URLs son requeridos' });
+    }
+
     try {
-        console.log("Petición recibida para obtener todos los pedidos");
-        const { rows } = await pool.query(`
-    SELECT
-        p.idpedido,
-        u.nombre AS nombre_usuario,
-        u.apellidos AS apellidos_usuario,
-        perf.nombre AS nombre_perfume,
-        p.cantidad,
-        p.estado
-    FROM
-        pedidos AS p
-    INNER JOIN
-        usuarios AS u ON p.idusuario = u.idusuario
-    INNER JOIN
-        perfume AS perf ON p.idperfume = perf.idperfume
-    WHERE
-        p.estado = 'confirmado'
-`);
-        if (rows.length === 0) {
-            return res.status(404).json({ error: 'No se encontraron pedidos' });
-        }
-        res.json(rows);
+        console.log(`Guardando ${urls.length} archivos multimedia para el producto ${producto}`);
+        
+        // Insertar múltiples archivos multimedia
+        const insertPromises = urls.map(({ url, tipo }) => {
+            return pool.query(
+                'INSERT INTO multimedia (producto, url, tipo) VALUES ($1, $2, $3) RETURNING *',
+                [producto, url, tipo || 'image']
+            );
+        });
+
+        const results = await Promise.all(insertPromises);
+        const multimedia = results.map(result => result.rows[0]);
+
+        res.status(201).json({
+            message: 'Multimedia guardada exitosamente',
+            multimedia
+        });
     } catch (error) {
-        console.error('Error al obtener los pedidos:', error);
+        console.error('Error al guardar multimedia:', error);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
-app.get('/api/pedidos/admin/todos', async (req, res) => {
+// Endpoint para obtener multimedia de un producto
+app.get('/api/multimedia/:productoId', async (req, res) => {
+    const { productoId } = req.params;
+    
     try {
-        console.log("Petición recibida para obtener todos los pedidos");
-        const { rows } = await pool.query(`
-  SELECT
-        p.idpedido,
-        u.nombre AS nombre_usuario,
-        u.apellidos AS apellidos_usuario,
-        perf.nombre AS nombre_perfume,
-        p.cantidad,
-        p.estado
-    FROM
-        pedidos AS p
-    INNER JOIN
-        usuarios AS u ON p.idusuario = u.idusuario
-    INNER JOIN
-        perfume AS perf ON p.idperfume = perf.idperfume
-    WHERE
-
-        p.estado = 'pendiente'
-`);
-        if (rows.length === 0) {
-            return res.status(404).json({ error: 'No se encontraron pedidos' });
-        }
-        res.json(rows);
-    } catch (error) {
-        console.error('Error al obtener los pedidos:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
-
-app.put('/api/pedidos/admin/confirmar/:id', async (req, res) => {
-    const { id } = req.params;
-    try {
-        console.log(`Petición recibida para confirmar el pedido con ID: ${id}`);
+        console.log(`Obteniendo multimedia para el producto ${productoId}`);
         const { rows } = await pool.query(
-            'UPDATE pedidos SET estado = "confirmado" WHERE idpedido = $1 RETURNING *',
+            'SELECT * FROM multimedia WHERE producto = $1 ORDER BY idmulti ASC',
+            [productoId]
+        );
+        
+        res.json(rows);
+    } catch (error) {
+        console.error('Error al obtener multimedia:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// Endpoint para eliminar multimedia
+app.delete('/api/multimedia/:id', verificarToken, esAdmin, async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        console.log(`Eliminando multimedia con ID: ${id}`);
+        const { rows } = await pool.query(
+            'DELETE FROM multimedia WHERE idmulti = $1 RETURNING *',
             [id]
         );
+        
         if (rows.length === 0) {
-            return res.status(404).json({ error: 'Pedido no encontrado' });
+            return res.status(404).json({ error: 'Multimedia no encontrada' });
+        }
+        
+        res.json({ message: 'Multimedia eliminada exitosamente' });
+    } catch (error) {
+        console.error('Error al eliminar multimedia:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// Endpoint para reemplazar toda la multimedia de un producto
+app.put('/api/multimedia/replace/:productoId', verificarToken, esAdmin, async (req, res) => {
+    const { productoId } = req.params;
+    const { urls } = req.body;
+    
+    if (!urls || !Array.isArray(urls)) {
+        return res.status(400).json({ error: 'URLs son requeridas y deben ser un array' });
+    }
+
+    try {
+        console.log(`Reemplazando multimedia del producto ${productoId}`);
+        
+        // 1. Obtener multimedia existente (para eliminar de Cloudinary después)
+        const { rows: multimediaAnterior } = await pool.query(
+            'SELECT * FROM multimedia WHERE producto = $1',
+            [productoId]
+        );
+        
+        console.log(`Encontradas ${multimediaAnterior.length} multimedia anteriores para eliminar`);
+        
+        // 2. Eliminar toda la multimedia anterior de la BD
+        await pool.query('DELETE FROM multimedia WHERE producto = $1', [productoId]);
+        
+        // 3. Insertar nueva multimedia
+        const insertPromises = urls.map(({ url, tipo }) => {
+            return pool.query(
+                'INSERT INTO multimedia (producto, url, tipo) VALUES ($1, $2, $3) RETURNING *',
+                [productoId, url, tipo || 'image']
+            );
+        });
+
+        const results = await Promise.all(insertPromises);
+        const nuevaMultimedia = results.map(result => result.rows[0]);
+
+        console.log(`Insertadas ${nuevaMultimedia.length} nuevas multimedia`);
+
+        // 4. TODO: Aquí podrías agregar lógica para eliminar de Cloudinary las imágenes anteriores
+        // Por ahora solo loggeamos las URLs que deberían eliminarse
+        if (multimediaAnterior.length > 0) {
+            console.log('URLs que podrían eliminarse de Cloudinary:');
+            multimediaAnterior.forEach(media => {
+                console.log(`- ${media.url}`);
+            });
+        }
+
+        res.json({
+            message: `Multimedia reemplazada exitosamente. ${multimediaAnterior.length} eliminadas, ${nuevaMultimedia.length} agregadas`,
+            eliminadas: multimediaAnterior.length,
+            agregadas: nuevaMultimedia.length,
+            multimedia: nuevaMultimedia
+        });
+    } catch (error) {
+        console.error('Error al reemplazar multimedia:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// Endpoint para corregir URLs de Cloudinary problemáticas
+app.post('/api/multimedia/fix-urls', verificarToken, esAdmin, async (req, res) => {
+    try {
+        console.log('Corrigiendo URLs problemáticas de multimedia');
+        
+        // Obtener todas las URLs que contienen el timestamp problemático
+        const { rows } = await pool.query(
+            'SELECT * FROM multimedia WHERE url LIKE $1 OR url LIKE $2',
+            ['%/v1760291318/%', '%v1760291318%']
+        );
+        
+        let corregidas = 0;
+        
+        for (const multimedia of rows) {
+            // Extraer public_id de la URL problemática
+            const match = multimedia.url.match(/\/v\d+\/([^\/]+)$/);
+            if (match) {
+                const filename = match[1]; // Esto incluye la extensión
+                const resourceType = multimedia.tipo || 'image';
+                
+                // Generar nueva URL sin el timestamp problemático
+                const newUrl = `https://res.cloudinary.com/dmyrtncnm/${resourceType}/upload/${filename}`;
+                
+                // Actualizar en base de datos
+                await pool.query(
+                    'UPDATE multimedia SET url = $1 WHERE idmulti = $2',
+                    [newUrl, multimedia.idmulti]
+                );
+                
+                corregidas++;
+                console.log(`URL corregida: ${multimedia.url} -> ${newUrl}`);
+            }
+        }
+        
+        res.json({
+            message: `${corregidas} URLs corregidas exitosamente`,
+            corregidas
+        });
+    } catch (error) {
+        console.error('Error al corregir URLs:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// ============ ENDPOINTS DE PRODUCTOS ============
+
+// Obtener todos los productos con selección
+app.get('/api/productos', async (req, res) => {
+    try {
+        console.log('Petición recibida para obtener todos los productos');
+        const query = `
+            SELECT DISTINCT ON (p."idProduct") 
+                   p.*, 
+                   s."Nombre" AS seleccionNombre,
+                   m.url AS img
+            FROM producto AS p
+            LEFT JOIN selecciones AS s ON p.seleccion = s."idSelec"
+            LEFT JOIN multimedia AS m ON p."idProduct" = m.producto
+            WHERE p.activo = true
+            ORDER BY p."idProduct" DESC, m.idmulti ASC
+        `;
+        const { rows } = await pool.query(query);
+        res.json(rows);
+    } catch (error) {
+        console.error('Error al obtener productos:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// Obtener un producto específico
+app.get('/api/producto/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        console.log(`Petición recibida para obtener el producto con ID: ${id}`);
+        const query = `
+            SELECT p.*, s."Nombre" AS seleccionNombre 
+            FROM producto AS p
+            LEFT JOIN selecciones AS s ON p.seleccion = s."idSelec"
+            WHERE p."idProduct" = $1 AND p.activo = true
+        `;
+        const { rows } = await pool.query(query, [id]);
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Producto no encontrado' });
         }
         res.json(rows[0]);
     } catch (error) {
-        console.error('Error al confirmar el pedido:', error);
+        console.error('Error al obtener el producto:', error);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
-app.post('/api/pedidos/temporales', async (req, res) => {
-    const { pedidos } = req.body;
-    if (!Array.isArray(pedidos)) {
-        return res.status(400).json({ error: 'Formato de pedidos inválido' });
-    }
+// Crear un nuevo producto
+app.post('/api/producto', verificarToken, esAdmin, async (req, res) => {
+    const { nombre, descripcion, seleccion, genero, top } = req.body;
     try {
-        // Obtener detalles de cada perfume
-        const ids = pedidos.map(p => p.idperfume);
-        if (ids.length === 0) return res.json({ pedidos: [] });
-
+        console.log('Petición recibida para crear un nuevo producto');
         const { rows } = await pool.query(
-            `SELECT p.*, m.nombre AS marcap
-            FROM perfume AS p
-            INNER JOIN marcas AS m ON p.marca = m.idmarca
-            WHERE p.activo = true AND idperfume = ANY($1)`,
-            [ids]
+            'INSERT INTO producto (nombre, descripcion, seleccion, genero, top, activo) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            [nombre, descripcion, seleccion, genero, top || false, true]
         );
-        // Unir info de pedido con info de perfume
-         
-        const pedidosEnriquecidos = pedidos.map(p => ({
-            ...p,
-            perfume: rows.find(r => r.idperfume === p.idperfume)
-        }));
-        res.json({ pedidos: pedidosEnriquecidos });
+        res.status(201).json(rows[0]);
     } catch (error) {
+        console.error('Error al crear el producto:', error);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
+// Actualizar un producto
+app.put('/api/producto/:id', verificarToken, esAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { nombre, descripcion, seleccion, genero, top } = req.body;
+    try {
+        console.log(`Petición recibida para actualizar el producto con ID: ${id}`);
+        const { rows } = await pool.query(
+            'UPDATE producto SET nombre = $1, descripcion = $2, seleccion = $3, genero = $4, top = $5 WHERE "idProduct" = $6 RETURNING *',
+            [nombre, descripcion, seleccion, genero, top || false, id]
+        );
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Producto no encontrado' });
+        }
+        res.json(rows[0]);
+    } catch (error) {
+        console.error('Error al actualizar el producto:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// Eliminar un producto (soft delete)
+app.delete('/api/producto/:id', verificarToken, esAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        console.log(`Petición recibida para eliminar el producto con ID: ${id}`);
+        const { rows } = await pool.query(
+            'UPDATE producto SET activo = false WHERE "idProduct" = $1 RETURNING *',
+            [id]
+        );
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Producto no encontrado' });
+        }
+        res.json({ message: 'Producto eliminado exitosamente' });
+    } catch (error) {
+        console.error('Error al eliminar el producto:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// ============ ENDPOINTS DE SELECCIONES ============
+
+// Obtener todas las selecciones
+app.get('/api/selecciones', async (req, res) => {
+    try {
+        console.log('Petición recibida para obtener todas las selecciones');
+        const { rows } = await pool.query('SELECT * FROM selecciones ORDER BY "Nombre" ASC');
+        res.json(rows);
+    } catch (error) {
+        console.error('Error al obtener selecciones:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// Crear una nueva selección
+app.post('/api/selecciones', verificarToken, esAdmin, async (req, res) => {
+    const { nombre, datos } = req.body;
+    try {
+        console.log('Petición recibida para crear una nueva selección');
+        const { rows } = await pool.query(
+            'INSERT INTO selecciones (nombre, datos) VALUES ($1, $2) RETURNING *',
+            [nombre, datos || '']
+        );
+        res.status(201).json(rows[0]);
+    } catch (error) {
+        console.error('Error al crear la selección:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// ============ ENDPOINTS DE PEDIDOS ACTUALIZADOS ============
+
+// Crear un nuevo pedido
+app.post('/api/pedidos', verificarToken, async (req, res) => {
+    const { producto, cantidad, comprador } = req.body;
+    try {
+        console.log('Petición recibida para crear un nuevo pedido');
+        const { rows } = await pool.query(
+            'INSERT INTO pedidos (producto, cantidad, comprador, estado) VALUES ($1, $2, $3, $4) RETURNING *',
+            [producto, cantidad, comprador || req.user.userId, 'pendiente']
+        );
+        res.status(201).json(rows[0]);
+    } catch (error) {
+        console.error('Error al crear el pedido:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// Obtener todos los pedidos (admin)
+app.get('/api/pedidos', verificarToken, esAdmin, async (req, res) => {
+    try {
+        console.log('Petición recibida para obtener todos los pedidos');
+        const query = `
+            SELECT p.*, pr.nombre AS productoNombre, u.nombre AS usuarioNombre, u.apellidos AS usuarioApellidos
+            FROM pedidos AS p
+            LEFT JOIN producto AS pr ON p.producto = pr.idProduct
+            LEFT JOIN usuarios AS u ON p.comprador = u.idusuario
+            ORDER BY p.idPedido DESC
+        `;
+        const { rows } = await pool.query(query);
+        res.json(rows);
+    } catch (error) {
+        console.error('Error al obtener pedidos:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
 
 // 5. Iniciar el servidor
 app.listen(port, () => {
