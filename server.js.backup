@@ -187,7 +187,7 @@ app.put('/api/auth/perfil', verificarToken, async (req, res) => {
         `;
         const values = [nombre, apellido, telefono, hashedPassword, req.user.userId];
         
-        const { rows } = await executeQuery(query, values);
+        const { rows } = await pool.query(query, values);
         if (rows.length === 0) {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
@@ -208,7 +208,7 @@ app.get('/api/pedidos/mis-pedidos', async (req, res) => {
             WHERE p.comprador = $1 AND p.estado != 'cancelado'
             ORDER BY p.idPedido DESC
         `;
-        const { rows } = await executeQuery(query, [userId]);
+        const { rows } = await pool.query(query, [userId]);
         if (rows.length === 0) {
             return res.status(404).json({ error: 'No se encontraron pedidos para este usuario' });
         }
@@ -225,7 +225,7 @@ app.put('/api/pedidos/:id', async (req, res) => {
     const { estado, cantidad } = req.body; // Asegúrate de que el cuerpo de la solicitud tenga el campo 'estado'
     try {
         console.log(`Petición recibida para actualizar el pedido con ID: ${id}`);
-        const { rows } = await executeQuery(
+        const { rows } = await pool.query(
             'UPDATE pedidos SET estado = $1, cantidad = $2 WHERE idPedido = $3 RETURNING *',
             [estado, cantidad, id]
         );
@@ -254,7 +254,7 @@ app.post('/api/multimedia', verificarToken, esAdmin, async (req, res) => {
         
         // Insertar múltiples archivos multimedia
         const insertPromises = urls.map(({ url, tipo }) => {
-            return executeQuery(
+            return pool.query(
                 'INSERT INTO multimedia (producto, url, tipo) VALUES ($1, $2, $3) RETURNING *',
                 [producto, url, tipo || 'image']
             );
@@ -279,7 +279,7 @@ app.get('/api/multimedia/:productoId', async (req, res) => {
     
     try {
         console.log(`Obteniendo multimedia para el producto ${productoId}`);
-        const { rows } = await executeQuery(
+        const { rows } = await pool.query(
             'SELECT * FROM multimedia WHERE producto = $1 ORDER BY idmulti ASC',
             [productoId]
         );
@@ -297,7 +297,7 @@ app.delete('/api/multimedia/:id', verificarToken, esAdmin, async (req, res) => {
     
     try {
         console.log(`Eliminando multimedia con ID: ${id}`);
-        const { rows } = await executeQuery(
+        const { rows } = await pool.query(
             'DELETE FROM multimedia WHERE idmulti = $1 RETURNING *',
             [id]
         );
@@ -326,7 +326,7 @@ app.put('/api/multimedia/replace/:productoId', verificarToken, esAdmin, async (r
         console.log(`Reemplazando multimedia del producto ${productoId}`);
         
         // 1. Obtener multimedia existente (para eliminar de Cloudinary después)
-        const { rows: multimediaAnterior } = await executeQuery(
+        const { rows: multimediaAnterior } = await pool.query(
             'SELECT * FROM multimedia WHERE producto = $1',
             [productoId]
         );
@@ -334,11 +334,11 @@ app.put('/api/multimedia/replace/:productoId', verificarToken, esAdmin, async (r
         console.log(`Encontradas ${multimediaAnterior.length} multimedia anteriores para eliminar`);
         
         // 2. Eliminar toda la multimedia anterior de la BD
-        await executeQuery('DELETE FROM multimedia WHERE producto = $1', [productoId]);
+        await pool.query('DELETE FROM multimedia WHERE producto = $1', [productoId]);
         
         // 3. Insertar nueva multimedia
         const insertPromises = urls.map(({ url, tipo }) => {
-            return executeQuery(
+            return pool.query(
                 'INSERT INTO multimedia (producto, url, tipo) VALUES ($1, $2, $3) RETURNING *',
                 [productoId, url, tipo || 'image']
             );
@@ -376,7 +376,7 @@ app.post('/api/multimedia/fix-urls', verificarToken, esAdmin, async (req, res) =
         console.log('Corrigiendo URLs problemáticas de multimedia');
         
         // Obtener todas las URLs que contienen el timestamp problemático
-        const { rows } = await executeQuery(
+        const { rows } = await pool.query(
             'SELECT * FROM multimedia WHERE url LIKE $1 OR url LIKE $2',
             ['%/v1760291318/%', '%v1760291318%']
         );
@@ -394,7 +394,7 @@ app.post('/api/multimedia/fix-urls', verificarToken, esAdmin, async (req, res) =
                 const newUrl = `https://res.cloudinary.com/dmyrtncnm/${resourceType}/upload/${filename}`;
                 
                 // Actualizar en base de datos
-                await executeQuery(
+                await pool.query(
                     'UPDATE multimedia SET url = $1 WHERE idmulti = $2',
                     [newUrl, multimedia.idmulti]
                 );
@@ -431,7 +431,7 @@ app.get('/api/productos', async (req, res) => {
             WHERE p.activo = true
             ORDER BY p."idProduct" DESC, m.idmulti ASC
         `;
-        const { rows } = await executeQuery(query);
+        const { rows } = await pool.query(query);
         res.json(rows);
     } catch (error) {
         console.error('Error al obtener productos:', error);
@@ -450,7 +450,7 @@ app.get('/api/producto/:id', async (req, res) => {
             LEFT JOIN selecciones AS s ON p.seleccion = s."idSelec"
             WHERE p."idProduct" = $1 AND p.activo = true
         `;
-        const { rows } = await executeQuery(query, [id]);
+        const { rows } = await pool.query(query, [id]);
         if (rows.length === 0) {
             return res.status(404).json({ error: 'Producto no encontrado' });
         }
@@ -466,7 +466,7 @@ app.post('/api/producto', verificarToken, esAdmin, async (req, res) => {
     const { nombre, descripcion, seleccion, genero, top } = req.body;
     try {
         console.log('Petición recibida para crear un nuevo producto');
-        const { rows } = await executeQuery(
+        const { rows } = await pool.query(
             'INSERT INTO producto (nombre, descripcion, seleccion, genero, top, activo) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
             [nombre, descripcion, seleccion, genero, top || false, true]
         );
@@ -483,7 +483,7 @@ app.put('/api/producto/:id', verificarToken, esAdmin, async (req, res) => {
     const { nombre, descripcion, seleccion, genero, top } = req.body;
     try {
         console.log(`Petición recibida para actualizar el producto con ID: ${id}`);
-        const { rows } = await executeQuery(
+        const { rows } = await pool.query(
             'UPDATE producto SET nombre = $1, descripcion = $2, seleccion = $3, genero = $4, top = $5 WHERE "idProduct" = $6 RETURNING *',
             [nombre, descripcion, seleccion, genero, top || false, id]
         );
@@ -502,7 +502,7 @@ app.delete('/api/producto/:id', verificarToken, esAdmin, async (req, res) => {
     const { id } = req.params;
     try {
         console.log(`Petición recibida para eliminar el producto con ID: ${id}`);
-        const { rows } = await executeQuery(
+        const { rows } = await pool.query(
             'UPDATE producto SET activo = false WHERE "idProduct" = $1 RETURNING *',
             [id]
         );
@@ -522,7 +522,7 @@ app.delete('/api/producto/:id', verificarToken, esAdmin, async (req, res) => {
 app.get('/api/selecciones', async (req, res) => {
     try {
         console.log('Petición recibida para obtener todas las selecciones');
-        const { rows } = await executeQuery('SELECT * FROM selecciones ORDER BY "Nombre" ASC');
+        const { rows } = await pool.query('SELECT * FROM selecciones ORDER BY "Nombre" ASC');
         res.json(rows);
     } catch (error) {
         console.error('Error al obtener selecciones:', error);
@@ -535,7 +535,7 @@ app.post('/api/selecciones', verificarToken, esAdmin, async (req, res) => {
     const { nombre, datos } = req.body;
     try {
         console.log('Petición recibida para crear una nueva selección');
-        const { rows } = await executeQuery(
+        const { rows } = await pool.query(
             'INSERT INTO selecciones (nombre, datos) VALUES ($1, $2) RETURNING *',
             [nombre, datos || '']
         );
@@ -553,7 +553,7 @@ app.post('/api/pedidos', verificarToken, async (req, res) => {
     const { producto, cantidad, comprador } = req.body;
     try {
         console.log('Petición recibida para crear un nuevo pedido');
-        const { rows } = await executeQuery(
+        const { rows } = await pool.query(
             'INSERT INTO pedidos (producto, cantidad, comprador, estado) VALUES ($1, $2, $3, $4) RETURNING *',
             [producto, cantidad, comprador || req.user.userId, 'pendiente']
         );
@@ -575,7 +575,7 @@ app.get('/api/pedidos', verificarToken, esAdmin, async (req, res) => {
             LEFT JOIN usuarios AS u ON p.comprador = u.idusuario
             ORDER BY p.idPedido DESC
         `;
-        const { rows } = await executeQuery(query);
+        const { rows } = await pool.query(query);
         res.json(rows);
     } catch (error) {
         console.error('Error al obtener pedidos:', error);
@@ -588,7 +588,7 @@ app.get('/api/productos/:productoId/estrellas', async (req, res) => {
     const { productoId } = req.params;
     try {
         console.log(`Petición recibida para obtener las estrellas del producto con ID: ${productoId}`);
-        const { rows } = await executeQuery(
+        const { rows } = await pool.query(
             'SELECT AVG(estrellas) AS promedio, COUNT(estrellas) AS total FROM pedidos WHERE producto = $1 AND estrellas IS NOT NULL',
             [productoId]
         );
@@ -609,7 +609,7 @@ app.get('/api/productos/:productoId/mi-calificacion', verificarToken, async (req
     
     try {
         console.log(`Obteniendo calificación del usuario ${userId} para el producto ${productoId}`);
-        const { rows } = await executeQuery(
+        const { rows } = await pool.query(
             'SELECT estrellas FROM pedidos WHERE producto = $1 AND comprador = $2 AND estrellas IS NOT NULL ORDER BY "idPedido" DESC LIMIT 1',
             [productoId, userId]
         );
@@ -639,14 +639,14 @@ app.post('/api/productos/:productoId/calificar', verificarToken, async (req, res
         console.log(`Usuario ${userId} calificando producto ${productoId} con ${estrellas} estrellas`);
         
         // Verificar si el usuario ya tiene un pedido para este producto
-        const { rows: pedidosExistentes } = await executeQuery(
+        const { rows: pedidosExistentes } = await pool.query(
             'SELECT "idPedido" FROM pedidos WHERE producto = $1 AND comprador = $2 ORDER BY "idPedido" DESC LIMIT 1',
             [productoId, userId]
         );
         
         if (pedidosExistentes.length === 0) {
             // Si no tiene pedidos, crear uno nuevo con la calificación
-            const { rows } = await executeQuery(
+            const { rows } = await pool.query(
                 'INSERT INTO pedidos (producto, cantidad, comprador, estado, estrellas) VALUES ($1, 0, $2, $3, $4) RETURNING *',
                 [productoId, userId, 'calificado', estrellas]
             );
@@ -656,7 +656,7 @@ app.post('/api/productos/:productoId/calificar', verificarToken, async (req, res
             });
         } else {
             // Si ya tiene pedidos, actualizar el más reciente con la calificación
-            const { rows } = await executeQuery(
+            const { rows } = await pool.query(
                 'UPDATE pedidos SET estrellas = $1 WHERE "idPedido" = $2 RETURNING *',
                 [estrellas, pedidosExistentes[0].idPedido]
             );
