@@ -108,18 +108,77 @@ const adaptQuery = (query, params) => {
     // Convertir ILIKE a LIKE para MySQL (case insensitive por defecto)
     adaptedQuery = adaptedQuery.replace(/ILIKE/gi, 'LIKE');
 
+    // Convertir DISTINCT ON - MySQL no lo soporta, usar GROUP BY en su lugar
+    if (adaptedQuery.includes('DISTINCT ON')) {
+        console.warn('⚠️  DISTINCT ON detectado - convirtiendo a sintaxis MySQL');
+        
+        // Extraer la columna del DISTINCT ON
+        const distinctOnMatch = adaptedQuery.match(/DISTINCT ON\s*\(\s*([^)]+)\s*\)/i);
+        if (distinctOnMatch) {
+            const distinctColumn = distinctOnMatch[1];
+            
+            // Remover DISTINCT ON y agregar GROUP BY al final
+            adaptedQuery = adaptedQuery.replace(/DISTINCT ON\s*\([^)]+\)/i, '');
+            
+            // Si no hay GROUP BY, agregarlo
+            if (!adaptedQuery.includes('GROUP BY')) {
+                // Buscar la posición del ORDER BY para insertar GROUP BY antes
+                const orderByIndex = adaptedQuery.search(/ORDER BY/i);
+                if (orderByIndex > -1) {
+                    adaptedQuery = adaptedQuery.substring(0, orderByIndex) + 
+                                  `GROUP BY ${distinctColumn} ` + 
+                                  adaptedQuery.substring(orderByIndex);
+                } else {
+                    adaptedQuery += ` GROUP BY ${distinctColumn}`;
+                }
+            }
+        }
+    }
+
     // Convertir RETURNING * a un SELECT después del INSERT/UPDATE (MySQL no soporta RETURNING)
     if (adaptedQuery.includes('RETURNING')) {
         console.warn('⚠️  RETURNING clausula detectada - MySQL no la soporta nativamente');
         adaptedQuery = adaptedQuery.replace(/\s+RETURNING\s+\*/gi, '');
     }
 
+    // Convertir boolean true/false a 1/0 para MySQL
+    adaptedQuery = adaptedQuery.replace(/= true/gi, '= 1');
+    adaptedQuery = adaptedQuery.replace(/= false/gi, '= 0');
+
     return { query: adaptedQuery, params };
+};
+
+// Función para manejar consultas específicas que requieren conversión completa
+const handleSpecificQueries = (originalQuery, params) => {
+    if (!USE_TEST_DB) {
+        return { query: originalQuery, params };
+    }
+
+    // Detectar y convertir la consulta de productos con DISTINCT ON
+    if (originalQuery.includes('DISTINCT ON') && originalQuery.includes('producto') && originalQuery.includes('multimedia')) {
+        console.log('🔄 Convirtiendo consulta de productos con DISTINCT ON para MySQL');
+        
+        const mysqlQuery = `
+            SELECT 
+                p.*,
+                s.\`Nombre\` AS seleccionNombre,
+                (SELECT m.url FROM multimedia m WHERE m.producto = p.\`idProduct\` ORDER BY m.idmulti ASC LIMIT 1) AS img
+            FROM producto AS p
+            LEFT JOIN selecciones AS s ON p.seleccion = s.\`idSelec\`
+            WHERE p.activo = 1
+            ORDER BY p.\`idProduct\` DESC
+        `;
+        
+        return { query: mysqlQuery, params };
+    }
+
+    // Para otras consultas, usar la adaptación normal
+    return adaptQuery(originalQuery, params);
 };
 
 // Función wrapper para ejecutar consultas con adaptación automática
 const executeQuery = async (originalQuery, params = []) => {
-    const { query, params: adaptedParams } = adaptQuery(originalQuery, params);
+    const { query, params: adaptedParams } = handleSpecificQueries(originalQuery, params);
     
     try {
         const result = await pool.query(query, adaptedParams);

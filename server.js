@@ -4,7 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { pool, getDatabaseInfo, executeQuery } = require('./config/database');
+const { pool, getDatabaseInfo, executeQuery, USE_TEST_DB } = require('./config/database');
 const saltRounds = 10;
 
 const app = express();
@@ -13,6 +13,7 @@ const port = process.env.PORT || 3001;
 // Mostrar información de la base de datos actual
 const dbInfo = getDatabaseInfo();
 console.log(`🚀 Iniciando servidor con ${dbInfo.type} (${dbInfo.environment})`);
+console.log("Host local:", process.env.DATABASE_URL);
 
 // Configuración de CORS para aceptar solo el FRONTEND_URL
 const corsOptions = {
@@ -63,6 +64,203 @@ const esAdmin = (req, res, next) => {
         res.status(403).json({ error: 'Acceso denegado. Se requiere rol de administrador.' });
     }
 };
+
+const ESTADO_CARRITO = 'carrito';
+const ESTADO_CONFIRMADO = 'confirmado';
+
+const obtenerDetallePedido = async (pedidoId) => {
+    const detalleQuery = `
+        SELECT 
+            p."idPedido" AS "idPedido",
+            p.producto,
+            p.cantidad,
+            p.estado,
+            p."created_at" AS "created_at",
+            pr.nombre AS "productoNombre",
+            pr.genero AS "genero",
+            s."Nombre" AS "seleccionNombre"
+        FROM pedidos AS p
+        LEFT JOIN producto AS pr ON p.producto = pr."idProduct"
+        LEFT JOIN selecciones AS s ON pr.seleccion = s."idSelec"
+        WHERE p."idPedido" = $1
+    `;
+
+    const { rows } = await executeQuery(detalleQuery, [pedidoId]);
+    return rows && rows.length > 0 ? rows[0] : null;
+};
+
+const obtenerPedidosUsuarioPorEstado = async (userId, estado) => {
+    const carritoQuery = `
+        SELECT
+            p."idPedido" AS "idPedido",
+            p.producto,
+            p.cantidad,
+            p.estado,
+            p."created_at" AS "created_at",
+            pr.nombre AS "productoNombre",
+            pr.descripcion AS "descripcion",
+            pr.genero AS "genero",
+            s."Nombre" AS "seleccionNombre",
+            (
+                SELECT url
+                FROM multimedia
+                WHERE multimedia.producto = pr."idProduct"
+                ORDER BY multimedia.idmulti ASC
+                LIMIT 1
+            ) AS img
+        FROM pedidos AS p
+        LEFT JOIN producto AS pr ON p.producto = pr."idProduct"
+        LEFT JOIN selecciones AS s ON pr.seleccion = s."idSelec"
+        WHERE p.comprador = $1 AND p.estado = $2
+        ORDER BY p."idPedido" DESC
+    `;
+
+    const { rows } = await executeQuery(carritoQuery, [userId, estado]);
+    return rows;
+};
+
+const limpiarPedidosPorEstado = async (userId, estado) => {
+    const deleteQuery = `
+        DELETE FROM pedidos
+        WHERE comprador = $1 AND estado = $2
+    `;
+
+    await executeQuery(deleteQuery, [userId, estado]);
+};
+
+app.get('/api/carrito', verificarToken, async (req, res) => {
+    try {
+        const items = await obtenerPedidosUsuarioPorEstado(req.user.userId, ESTADO_CARRITO);
+        res.json(items);
+    } catch (error) {
+        console.error('Error al obtener el carrito:', error);
+        res.status(500).json({ error: 'No se pudo obtener el carrito' });
+    }
+});
+
+app.post('/api/carrito', verificarToken, async (req, res) => {
+    const { productoId, cantidad = 1 } = req.body;
+
+    const parsedCantidad = Number(cantidad);
+    if (!productoId || !Number.isFinite(parsedCantidad) || parsedCantidad <= 0) {
+        return res.status(400).json({ error: 'Datos de carrito inválidos' });
+    }
+
+    try {
+        const buscarExistenteQuery = `
+            SELECT "idPedido", cantidad
+            FROM pedidos
+            WHERE comprador = $1 AND producto = $2 AND estado = $3
+            LIMIT 1
+        `;
+
+        const { rows: existentes } = await executeQuery(buscarExistenteQuery, [
+            req.user.userId,
+            productoId,
+            ESTADO_CARRITO,
+        ]);
+
+        if (existentes.length > 0) {
+            const registro = existentes[0];
+            const registroId = registro.idPedido || registro.idpedido;
+            const nuevaCantidad = (Number(registro.cantidad) || 0) + parsedCantidad;
+
+            const updateQuery = `
+                UPDATE pedidos
+                SET cantidad = $1
+                WHERE "idPedido" = $2
+            `;
+
+            await executeQuery(updateQuery, [nuevaCantidad, registroId]);
+        } else {
+            const insertQuery = `
+                INSERT INTO pedidos (producto, cantidad, comprador, estado)
+                VALUES ($1, $2, $3, $4)
+            `;
+
+            await executeQuery(insertQuery, [
+                productoId,
+                parsedCantidad,
+                req.user.userId,
+                ESTADO_CARRITO,
+            ]);
+        }
+
+        const items = await obtenerPedidosUsuarioPorEstado(req.user.userId, ESTADO_CARRITO);
+        res.status(201).json(items);
+    } catch (error) {
+        console.error('Error al agregar al carrito:', error);
+        res.status(500).json({ error: 'No se pudo actualizar el carrito' });
+    }
+});
+
+app.put('/api/carrito/:productoId', verificarToken, async (req, res) => {
+    const { productoId } = req.params;
+    const { cantidad } = req.body;
+
+    const parsedCantidad = Number(cantidad);
+    if (!Number.isFinite(parsedCantidad)) {
+        return res.status(400).json({ error: 'Cantidad inválida' });
+    }
+
+    try {
+        if (parsedCantidad <= 0) {
+            const deleteQuery = `
+                DELETE FROM pedidos
+                WHERE comprador = $1 AND producto = $2 AND estado = $3
+            `;
+            await executeQuery(deleteQuery, [req.user.userId, productoId, ESTADO_CARRITO]);
+        } else {
+            const updateQuery = `
+                UPDATE pedidos
+                SET cantidad = $1
+                WHERE comprador = $2 AND producto = $3 AND estado = $4
+            `;
+
+            await executeQuery(updateQuery, [
+                parsedCantidad,
+                req.user.userId,
+                productoId,
+                ESTADO_CARRITO,
+            ]);
+        }
+
+        const items = await obtenerPedidosUsuarioPorEstado(req.user.userId, ESTADO_CARRITO);
+        res.json(items);
+    } catch (error) {
+        console.error('Error al actualizar el carrito:', error);
+        res.status(500).json({ error: 'No se pudo actualizar el carrito' });
+    }
+});
+
+app.delete('/api/carrito/:productoId', verificarToken, async (req, res) => {
+    const { productoId } = req.params;
+
+    try {
+        const deleteQuery = `
+            DELETE FROM pedidos
+            WHERE comprador = $1 AND producto = $2 AND estado = $3
+        `;
+
+        await executeQuery(deleteQuery, [req.user.userId, productoId, ESTADO_CARRITO]);
+        const items = await obtenerPedidosUsuarioPorEstado(req.user.userId, ESTADO_CARRITO);
+        res.json(items);
+    } catch (error) {
+        console.error('Error al eliminar del carrito:', error);
+        res.status(500).json({ error: 'No se pudo eliminar el artículo del carrito' });
+    }
+});
+
+app.delete('/api/carrito', verificarToken, async (req, res) => {
+    try {
+        await limpiarPedidosPorEstado(req.user.userId, ESTADO_CARRITO);
+        res.status(204).send();
+    } catch (error) {
+        console.error('Error al vaciar el carrito:', error);
+        res.status(500).json({ error: 'No se pudo vaciar el carrito' });
+    }
+});
+
 // 4. Rutas (los "endpoints" de nuestra API)
 app.get('/', (req, res) => {
     res.send('¡API del Catálogo funcionando!');
@@ -78,6 +276,7 @@ app.get('/api/busqueda', async (req, res) => {
             WHERE p.activo = true AND (p.nombre ILIKE $1 OR s."Nombre" ILIKE $1)
             ORDER BY p."idProduct" DESC
         `;
+
         const { rows } = await executeQuery(query, [`%${q}%`]);
         res.json(rows);
     } catch (error) {
@@ -155,10 +354,15 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/auth/perfil', verificarToken, async (req, res) => {
     try {
         console.log(`Petición recibida para obtener el perfil del usuario con ID: ${req.user.userId}`);
-        const { rows } = await executeQuery(
-            'SELECT "idUser", nombre, apellidos, telf FROM usuarios WHERE "idUser" = $1',
-            [req.user.userId]
-        );
+        const perfilQuery = `
+            SELECT u."idUser", u.nombre, u.apellidos, u.telf, u.seleccion,
+                   s."Nombre" AS "seleccionNombre",
+                   s."Datos" AS "seleccionDatos"
+            FROM usuarios AS u
+            LEFT JOIN selecciones AS s ON u.seleccion = s."idSelec"
+            WHERE u."idUser" = $1
+        `;
+        const { rows } = await executeQuery(perfilQuery, [req.user.userId]);
         if (rows.length === 0) {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
@@ -169,28 +373,54 @@ app.get('/api/auth/perfil', verificarToken, async (req, res) => {
     }
 });
 app.put('/api/auth/perfil', verificarToken, async (req, res) => {
-    const { nombre, apellido, telefono, contraseña } = req.body;
+    const { nombre, apellido, telefono, contraseña, seleccion } = req.body;
     try {
         console.log(`Petición recibida para actualizar el perfil del usuario con ID: ${req.user.userId}`);
-        
+
+        if (!seleccion) {
+            return res.status(400).json({ error: 'La selección es obligatoria' });
+        }
+
         // Si se proporciona una nueva contraseña, la hasheamos
         let hashedPassword = null;
         if (contraseña) {
             hashedPassword = await bcrypt.hash(contraseña, saltRounds);
         }
 
-        const query = `
+        const updateQuery = `
             UPDATE usuarios 
-            SET nombre = $1, apellidos = $2, telf = $3, contraseña = COALESCE($4, contraseña)
-            WHERE "idUser" = $5 
-            RETURNING "idUser", nombre, apellidos, telf
+            SET nombre = $1, apellidos = $2, telf = $3, contraseña = COALESCE($4, contraseña), seleccion = $5
+            WHERE "idUser" = $6
         `;
-        const values = [nombre, apellido, telefono, hashedPassword, req.user.userId];
+        const values = [nombre, apellido, telefono, hashedPassword, seleccion, req.user.userId];
+
+        const resultadoActualizacion = await executeQuery(updateQuery, values);
+
+        // Verificar si se actualizó algún registro (MySQL y PostgreSQL tienen propiedades distintas)
+        const actualizoRegistro =
+            (resultadoActualizacion.rowCount && resultadoActualizacion.rowCount > 0) ||
+            (Array.isArray(resultadoActualizacion.rows)
+                ? resultadoActualizacion.rows.length > 0
+                : resultadoActualizacion.rows && resultadoActualizacion.rows.affectedRows > 0);
         
-        const { rows } = await executeQuery(query, values);
+        if (!actualizoRegistro) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        const perfilActualizadoQuery = `
+            SELECT u."idUser", u.nombre, u.apellidos, u.telf, u.seleccion,
+                   s."Nombre" AS "seleccionNombre",
+                   s."Datos" AS "seleccionDatos"
+            FROM usuarios AS u
+            LEFT JOIN selecciones AS s ON u.seleccion = s."idSelec"
+            WHERE u."idUser" = $1
+        `;
+        const { rows } = await executeQuery(perfilActualizadoQuery, [req.user.userId]);
+
         if (rows.length === 0) {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
+
         res.json(rows[0]);
     } catch (error) {
         console.error('Error al actualizar el perfil del usuario:', error);
@@ -216,6 +446,133 @@ app.get('/api/pedidos/mis-pedidos', async (req, res) => {
     } catch (error) {
         console.error('Error al obtener los pedidos:', error);
         res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+app.post('/api/pedidos/checkout', verificarToken, async (req, res) => {
+    const { items, pago } = req.body;
+
+    if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: 'El pedido debe incluir al menos un producto' });
+    }
+
+    const formatoInvalido = items.some((item) => {
+        const productoId = item?.productoId ?? item?.producto;
+        const cantidad = Number(item?.cantidad);
+        return !productoId || !Number.isFinite(cantidad) || cantidad <= 0;
+    });
+
+    if (formatoInvalido) {
+        return res.status(400).json({ error: 'Verifica los productos y cantidades del pedido' });
+    }
+
+    if (!pago || !pago.titular || !pago.referencia) {
+        return res.status(400).json({ error: 'Faltan datos del pago de demostración' });
+    }
+
+    try {
+        console.log(`Confirmando checkout para el usuario ${req.user.userId} con ${items.length} artículos`);
+
+        const carritoActual = await obtenerPedidosUsuarioPorEstado(req.user.userId, ESTADO_CARRITO);
+        const carritoMap = new Map();
+        carritoActual.forEach((registro) => {
+            carritoMap.set(String(registro.producto), registro);
+        });
+
+        const pedidosConfirmados = [];
+
+        for (const item of items) {
+            const productoId = item.productoId ?? item.producto;
+            const cantidad = Number(item.cantidad);
+            const registroExistente = carritoMap.get(String(productoId));
+
+            if (registroExistente) {
+                const pedidoId = registroExistente.idPedido || registroExistente.idpedido;
+                const updateQuery = `
+                    UPDATE pedidos
+                    SET cantidad = $1, estado = $2
+                    WHERE "idPedido" = $3
+                `;
+
+                await executeQuery(updateQuery, [cantidad, ESTADO_CONFIRMADO, pedidoId]);
+
+                const detalle = await obtenerDetallePedido(pedidoId);
+                pedidosConfirmados.push(
+                    detalle || {
+                        idPedido: pedidoId,
+                        producto: productoId,
+                        cantidad,
+                        estado: ESTADO_CONFIRMADO,
+                    }
+                );
+
+                carritoMap.delete(String(productoId));
+            } else {
+                const insertQuery = `
+                    INSERT INTO pedidos (producto, cantidad, comprador, estado)
+                    VALUES ($1, $2, $3, $4)
+                    RETURNING "idPedido"
+                `;
+
+                const { rows: insercion } = await executeQuery(insertQuery, [
+                    productoId,
+                    cantidad,
+                    req.user.userId,
+                    ESTADO_CONFIRMADO,
+                ]);
+
+                let pedidoId = null;
+
+                if (Array.isArray(insercion) && insercion.length > 0) {
+                    pedidoId = insercion[0].idPedido ?? insercion[0].idpedido;
+                } else if (USE_TEST_DB && insercion && typeof insercion.insertId !== 'undefined') {
+                    pedidoId = insercion.insertId;
+                }
+
+                if (!pedidoId) {
+                    throw new Error('No fue posible confirmar uno de los productos del pedido');
+                }
+
+                const detalle = await obtenerDetallePedido(pedidoId);
+                pedidosConfirmados.push(
+                    detalle || {
+                        idPedido: pedidoId,
+                        producto: productoId,
+                        cantidad,
+                        estado: ESTADO_CONFIRMADO,
+                    }
+                );
+            }
+        }
+
+        if (carritoMap.size > 0) {
+            for (const registro of carritoMap.values()) {
+                const registroId = registro.idPedido || registro.idpedido;
+                if (!registroId) {
+                    continue;
+                }
+
+                const deleteQuery = `
+                    DELETE FROM pedidos
+                    WHERE "idPedido" = $1
+                `;
+
+                await executeQuery(deleteQuery, [registroId]);
+            }
+        }
+
+        res.status(201).json({
+            message: 'Pedido confirmado en modo demostración',
+            pedidos: pedidosConfirmados,
+            pago: {
+                metodo: pago.metodo,
+                titular: pago.titular,
+                referencia: pago.referencia,
+            },
+        });
+    } catch (error) {
+        console.error('Error durante el checkout:', error);
+        res.status(500).json({ error: 'No se pudo completar el checkout' });
     }
 });
 
@@ -420,6 +777,31 @@ app.post('/api/multimedia/fix-urls', verificarToken, esAdmin, async (req, res) =
 app.get('/api/productos', async (req, res) => {
     try {
         console.log('Petición recibida para obtener todos los productos');
+        
+        // Parámetros de consulta opcionales
+        const { seleccion, exclude, limit } = req.query;
+        
+        let whereConditions = ['p.activo = true'];
+        let queryParams = [];
+        let paramIndex = 1;
+        
+        // Filtro por selección
+        if (seleccion) {
+            whereConditions.push(`p.seleccion = $${paramIndex}`);
+            queryParams.push(seleccion);
+            paramIndex++;
+        }
+        
+        // Excluir un producto específico
+        if (exclude) {
+            whereConditions.push(`p."idProduct" != $${paramIndex}`);
+            queryParams.push(exclude);
+            paramIndex++;
+        }
+        
+        const whereClause = whereConditions.join(' AND ');
+        const limitClause = limit ? `LIMIT ${parseInt(limit)}` : '';
+        
         const query = `
             SELECT DISTINCT ON (p."idProduct") 
                    p.*, 
@@ -428,10 +810,12 @@ app.get('/api/productos', async (req, res) => {
             FROM producto AS p
             LEFT JOIN selecciones AS s ON p.seleccion = s."idSelec"
             LEFT JOIN multimedia AS m ON p."idProduct" = m.producto
-            WHERE p.activo = true
+            WHERE ${whereClause}
             ORDER BY p."idProduct" DESC, m.idmulti ASC
+            ${limitClause}
         `;
-        const { rows } = await executeQuery(query);
+        
+        const { rows } = await executeQuery(query, queryParams);
         res.json(rows);
     } catch (error) {
         console.error('Error al obtener productos:', error);
@@ -582,6 +966,105 @@ app.get('/api/pedidos', verificarToken, esAdmin, async (req, res) => {
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
+// ============ ENDPOINTS DE COMENTARIOS ============
+
+// Obtener comentarios de un producto
+app.get('/api/productos/:id/comentarios', async (req, res) => {
+    const { id } = req.params;
+    try {
+        console.log(`Petición recibida para obtener comentarios del producto con ID: ${id}`);
+        const query = `
+            SELECT c.*, u.nombre, u.apellidos
+            FROM comentarios AS c
+            LEFT JOIN usuarios AS u ON c.usuario = u."idUser"
+            WHERE c.producto = $1
+            ORDER BY c."idComent" DESC
+        `;
+        const { rows } = await executeQuery(query, [id]);
+        
+        // Formatear la respuesta para que coincida con lo que espera el frontend
+        const comentariosFormateados = rows.map(comentario => ({
+            id: comentario.idComent || comentario.idcoment,
+            contenido: comentario.contenido,
+            createdAt: comentario.created_at,
+            usuario: {
+                nombre: comentario.nombre,
+                apellidos: comentario.apellidos
+            }
+        }));
+        
+        res.json(comentariosFormateados);
+    } catch (error) {
+        console.error('Error al obtener comentarios:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// Crear un nuevo comentario
+app.post('/api/productos/:id/comentarios', verificarToken, async (req, res) => {
+    const { id } = req.params;
+    const { contenido } = req.body;
+    const userId = req.user.userId;
+    
+    if (!contenido || !contenido.trim()) {
+        return res.status(400).json({ error: 'El contenido del comentario es requerido' });
+    }
+    
+    try {
+        console.log(`Petición recibida para crear comentario del usuario ${userId} en producto ${id}`);
+        
+        // Insertar el comentario
+        const insertQuery = `
+            INSERT INTO comentarios (contenido, usuario, producto) 
+            VALUES ($1, $2, $3) 
+            RETURNING *
+        `;
+        const { rows: comentarioRows } = await executeQuery(insertQuery, [contenido.trim(), userId, id]);
+
+        let comentarioId = null;
+        if (Array.isArray(comentarioRows) && comentarioRows.length > 0) {
+            comentarioId = comentarioRows[0].idComent || comentarioRows[0].idcoment;
+        } else if (USE_TEST_DB && comentarioRows?.insertId) {
+            comentarioId = comentarioRows.insertId;
+        }
+
+        if (!comentarioId) {
+            throw new Error('No se pudo crear el comentario');
+        }
+
+        const detalleQuery = `
+            SELECT 
+                c."idComent" AS "id",
+                c.contenido,
+                c."created_at" AS "created_at",
+                u.nombre,
+                u.apellidos
+            FROM comentarios AS c
+            LEFT JOIN usuarios AS u ON c.usuario = u."idUser"
+            WHERE c."idComent" = $1
+        `;
+        const { rows: detalleRows } = await executeQuery(detalleQuery, [comentarioId]);
+        const detalle = detalleRows[0];
+
+        const comentarioCompleto = {
+            id: detalle?.id || comentarioId,
+            contenido: detalle?.contenido || contenido.trim(),
+            createdAt: detalle?.created_at || new Date().toISOString(),
+            usuario: {
+                nombre: detalle?.nombre || 'Usuario',
+                apellidos: detalle?.apellidos || ''
+            }
+        };
+
+        res.status(201).json(comentarioCompleto);
+    } catch (error) {
+        console.error('Error al crear comentario:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// COMENTARIOS Y CALIFICACIONES DE PRODUCTOS
+
 
 // Obtener promedio de estrellas de un producto
 app.get('/api/productos/:productoId/estrellas', async (req, res) => {
