@@ -427,21 +427,34 @@ app.put('/api/auth/perfil', verificarToken, async (req, res) => {
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
-app.get('/api/pedidos/mis-pedidos', async (req, res) => {
-    const { userId } = req.query; // Asumiendo que el ID del usuario se pasa como parámetro de consulta
+app.get('/api/pedidos/mis-pedidos', verificarToken, async (req, res) => {
     try {
-        console.log(`Petición recibida para obtener los pedidos del usuario con ID: ${userId}`);
+        console.log(`Petición recibida para obtener los pedidos del usuario con ID: ${req.user.userId}`);
         const query = `
-            SELECT p.*, pr.nombre AS productoNombre 
+            SELECT 
+                p."idPedido", 
+                p.producto, 
+                p.cantidad, 
+                p.estado, 
+                p.created_at,
+                pr.nombre AS "productoNombre",
+                pr.descripcion AS "productoDescripcion",
+                pr.genero AS "productoGenero",
+                s."Nombre" AS "seleccionNombre",
+                (
+                    SELECT url
+                    FROM multimedia
+                    WHERE multimedia.producto = pr."idProduct"
+                    ORDER BY multimedia.idmulti ASC
+                    LIMIT 1
+                ) AS img
             FROM pedidos AS p
-            LEFT JOIN producto AS pr ON p.producto = pr.idProduct
-            WHERE p.comprador = $1 AND p.estado != 'cancelado'
-            ORDER BY p.idPedido DESC
+            LEFT JOIN producto AS pr ON p.producto = pr."idProduct"
+            LEFT JOIN selecciones AS s ON pr.seleccion = s."idSelec"
+            WHERE p.comprador = $1 AND p.estado != 'carrito'
+            ORDER BY p."idPedido" DESC
         `;
-        const { rows } = await executeQuery(query, [userId]);
-        if (rows.length === 0) {
-            return res.status(404).json({ error: 'No se encontraron pedidos para este usuario' });
-        }
+        const { rows } = await executeQuery(query, [req.user.userId]);
         res.json(rows);
     } catch (error) {
         console.error('Error al obtener los pedidos:', error);
@@ -583,7 +596,7 @@ app.put('/api/pedidos/:id', async (req, res) => {
     try {
         console.log(`Petición recibida para actualizar el pedido con ID: ${id}`);
         const { rows } = await executeQuery(
-            'UPDATE pedidos SET estado = $1, cantidad = $2 WHERE idPedido = $3 RETURNING *',
+            'UPDATE pedidos SET estado = $1, cantidad = $2 WHERE "idPedido" = $3 RETURNING *',
             [estado, cantidad, id]
         );
         if (rows.length === 0) {
@@ -920,7 +933,7 @@ app.post('/api/selecciones', verificarToken, esAdmin, async (req, res) => {
     try {
         console.log('Petición recibida para crear una nueva selección');
         const { rows } = await executeQuery(
-            'INSERT INTO selecciones (nombre, datos) VALUES ($1, $2) RETURNING *',
+            'INSERT INTO selecciones ("Nombre", "Datos") VALUES ($1, $2) RETURNING *',
             [nombre, datos || '']
         );
         res.status(201).json(rows[0]);
@@ -955,9 +968,9 @@ app.get('/api/pedidos', verificarToken, esAdmin, async (req, res) => {
         const query = `
             SELECT p.*, pr.nombre AS productoNombre, u.nombre AS usuarioNombre, u.apellidos AS usuarioApellidos
             FROM pedidos AS p
-            LEFT JOIN producto AS pr ON p.producto = pr.idProduct
-            LEFT JOIN usuarios AS u ON p.comprador = u.idusuario
-            ORDER BY p.idPedido DESC
+            LEFT JOIN producto AS pr ON p.producto = pr."idProduct"
+            LEFT JOIN usuarios AS u ON p.comprador = u."idUser"
+            ORDER BY p."idPedido" DESC
         `;
         const { rows } = await executeQuery(query);
         res.json(rows);
@@ -1072,7 +1085,7 @@ app.get('/api/productos/:productoId/estrellas', async (req, res) => {
     try {
         console.log(`Petición recibida para obtener las estrellas del producto con ID: ${productoId}`);
         const { rows } = await executeQuery(
-            'SELECT AVG(estrellas) AS promedio, COUNT(estrellas) AS total FROM pedidos WHERE producto = $1 AND estrellas IS NOT NULL',
+            'SELECT AVG(valoracion) AS promedio, COUNT(valoracion) AS total FROM estrellas WHERE producto = $1',
             [productoId]
         );
         res.json({
@@ -1093,7 +1106,7 @@ app.get('/api/productos/:productoId/mi-calificacion', verificarToken, async (req
     try {
         console.log(`Obteniendo calificación del usuario ${userId} para el producto ${productoId}`);
         const { rows } = await executeQuery(
-            'SELECT estrellas FROM pedidos WHERE producto = $1 AND comprador = $2 AND estrellas IS NOT NULL ORDER BY "idPedido" DESC LIMIT 1',
+            'SELECT valoracion FROM estrellas WHERE producto = $1 AND usuario = $2 LIMIT 1',
             [productoId, userId]
         );
         
@@ -1101,7 +1114,7 @@ app.get('/api/productos/:productoId/mi-calificacion', verificarToken, async (req
             return res.json({ calificacion: null });
         }
         
-        res.json({ calificacion: rows[0].estrellas });
+        res.json({ calificacion: rows[0].valoracion });
     } catch (error) {
         console.error('Error al obtener la calificación del usuario:', error);
         res.status(500).json({ error: 'Error interno del servidor' });
@@ -1121,31 +1134,31 @@ app.post('/api/productos/:productoId/calificar', verificarToken, async (req, res
     try {
         console.log(`Usuario ${userId} calificando producto ${productoId} con ${estrellas} estrellas`);
         
-        // Verificar si el usuario ya tiene un pedido para este producto
-        const { rows: pedidosExistentes } = await executeQuery(
-            'SELECT "idPedido" FROM pedidos WHERE producto = $1 AND comprador = $2 ORDER BY "idPedido" DESC LIMIT 1',
+        // Verificar si el usuario ya tiene una calificación para este producto
+        const { rows: calificacionExistente } = await executeQuery(
+            'SELECT "idStar" FROM estrellas WHERE producto = $1 AND usuario = $2',
             [productoId, userId]
         );
         
-        if (pedidosExistentes.length === 0) {
-            // Si no tiene pedidos, crear uno nuevo con la calificación
+        if (calificacionExistente.length === 0) {
+            // Si no tiene calificación, crear una nueva
             const { rows } = await executeQuery(
-                'INSERT INTO pedidos (producto, cantidad, comprador, estado, estrellas) VALUES ($1, 0, $2, $3, $4) RETURNING *',
-                [productoId, userId, 'calificado', estrellas]
+                'INSERT INTO estrellas (valoracion, producto, usuario) VALUES ($1, $2, $3) RETURNING *',
+                [estrellas, productoId, userId]
             );
             res.status(201).json({ 
                 message: 'Calificación agregada exitosamente',
-                pedido: rows[0]
+                calificacion: rows[0]
             });
         } else {
-            // Si ya tiene pedidos, actualizar el más reciente con la calificación
+            // Si ya tiene calificación, actualizarla
             const { rows } = await executeQuery(
-                'UPDATE pedidos SET estrellas = $1 WHERE "idPedido" = $2 RETURNING *',
-                [estrellas, pedidosExistentes[0].idPedido]
+                'UPDATE estrellas SET valoracion = $1 WHERE "idStar" = $2 RETURNING *',
+                [estrellas, calificacionExistente[0].idStar]
             );
             res.json({ 
                 message: 'Calificación actualizada exitosamente',
-                pedido: rows[0]
+                calificacion: rows[0]
             });
         }
         
