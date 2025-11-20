@@ -965,7 +965,11 @@ app.get('/api/pedidos', verificarToken, esAdmin, async (req, res) => {
   try {
     console.log('Petición recibida para obtener todos los pedidos');
     const query = `
-            SELECT p.*, pr.nombre AS productoNombre, u.nombre AS usuarioNombre, u.apellidos AS usuarioApellidos
+            SELECT 
+                p.*,
+                pr.nombre AS "productoNombre",
+                u.nombre AS "usuarioNombre",
+                u.apellidos AS "usuarioApellidos"
             FROM pedidos AS p
             LEFT JOIN producto AS pr ON p.producto = pr."idProduct"
             LEFT JOIN usuarios AS u ON p.comprador = u."idUser"
@@ -1170,7 +1174,7 @@ app.get('/api/reportes/usuarios-nuevos', verificarToken, esAdmin, async (req, re
             LEFT JOIN selecciones AS s ON u.seleccion = s."idSelec"
             LEFT JOIN pedidos AS p ON u."idUser" = p.comprador AND p.estado = 'confirmado'
             WHERE u.admin = false
-            GROUP BY u."idUser", u.nombre, u.apellidos, u.correo, u.telf, s."Nombre", u."created_at"
+            GROUP BY u."idUser", s."Nombre"
             ORDER BY u."created_at" DESC
             LIMIT 20
         `;
