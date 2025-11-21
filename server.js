@@ -859,12 +859,12 @@ app.get('/api/producto/:id', async (req, res) => {
 
 // Crear un nuevo producto
 app.post('/api/producto', verificarToken, esAdmin, async (req, res) => {
-  const { nombre, descripcion, seleccion, genero, top } = req.body;
+  const { nombre, descripcion, seleccion, genero, top, precio } = req.body;
   try {
     console.log('Petición recibida para crear un nuevo producto');
     const { rows } = await executeQuery(
-      'INSERT INTO producto (nombre, descripcion, seleccion, genero, top, activo) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [nombre, descripcion, seleccion, genero, top || false, true]
+      'INSERT INTO producto (nombre, descripcion, seleccion, genero, top, activo, precio) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [nombre, descripcion, seleccion, genero, top || false, true, precio || 300]
     );
     res.status(201).json(rows[0]);
   } catch (error) {
@@ -876,12 +876,12 @@ app.post('/api/producto', verificarToken, esAdmin, async (req, res) => {
 // Actualizar un producto
 app.put('/api/producto/:id', verificarToken, esAdmin, async (req, res) => {
   const { id } = req.params;
-  const { nombre, descripcion, seleccion, genero, top } = req.body;
+  const { nombre, descripcion, seleccion, genero, top, precio } = req.body;
   try {
     console.log(`Petición recibida para actualizar el producto con ID: ${id}`);
     const { rows } = await executeQuery(
-      'UPDATE producto SET nombre = $1, descripcion = $2, seleccion = $3, genero = $4, top = $5 WHERE "idProduct" = $6 RETURNING *',
-      [nombre, descripcion, seleccion, genero, top || false, id]
+      'UPDATE producto SET nombre = $1, descripcion = $2, seleccion = $3, genero = $4, top = $5, precio = $6 WHERE "idProduct" = $7 RETURNING *',
+      [nombre, descripcion, seleccion, genero, top || false, precio || 300, id]
     );
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Producto no encontrado' });
