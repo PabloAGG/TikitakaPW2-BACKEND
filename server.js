@@ -1069,21 +1069,26 @@ app.post('/api/pedidos', verificarToken, async (req, res) => {
 
 // Obtener todos los pedidos (admin)
 app.get('/api/pedidos', verificarToken, esAdmin, async (req, res) => {
-    try {
-        console.log('Petición recibida para obtener todos los pedidos');
-        const query = `
+  try {
+    console.log('Petición recibida para obtener todos los pedidos');
+    const query = `
             SELECT p.*, pr.nombre AS productoNombre, u.nombre AS usuarioNombre, u.apellidos AS usuarioApellidos
+            SELECT 
+                p.*,
+                pr.nombre AS "productoNombre",
+                u.nombre AS "usuarioNombre",
+                u.apellidos AS "usuarioApellidos"
             FROM pedidos AS p
             LEFT JOIN producto AS pr ON p.producto = pr."idProduct"
             LEFT JOIN usuarios AS u ON p.comprador = u."idUser"
             ORDER BY p."idPedido" DESC
         `;
-        const { rows } = await executeQuery(query);
-        res.json(rows);
-    } catch (error) {
-        console.error('Error al obtener pedidos:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
+    const { rows } = await executeQuery(query);
+    res.json(rows);
+  } catch (error) {
+    console.error('Error al obtener pedidos:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
 });
 // ============ ENDPOINTS DE COMENTARIOS ============
 
@@ -1273,6 +1278,143 @@ app.post('/api/productos/:productoId/calificar', verificarToken, async (req, res
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
+
+
+
+// Obtener productos más vendidos
+app.get('/api/reportes/productos-mas-vendidos', verificarToken, esAdmin, async (req, res) => {
+  try {
+    console.log('Petición recibida para obtener productos más vendidos');
+    const query = `
+            SELECT 
+                p."idProduct",
+                p.nombre,
+                p.genero,
+                s."Nombre" AS seleccionNombre,
+                SUM(ped.cantidad) AS total_vendido,
+                COUNT(DISTINCT ped."idPedido") AS num_pedidos,
+                (
+                    SELECT url
+                    FROM multimedia
+                    WHERE multimedia.producto = p."idProduct"
+                    ORDER BY multimedia.idmulti ASC
+                    LIMIT 1
+                ) AS img
+            FROM pedidos AS ped
+            INNER JOIN producto AS p ON ped.producto = p."idProduct"
+            LEFT JOIN selecciones AS s ON p.seleccion = s."idSelec"
+            WHERE ped.estado = 'confirmado'
+            GROUP BY p."idProduct", p.nombre, p.genero, s."Nombre"
+            ORDER BY total_vendido DESC
+            LIMIT 10
+        `;
+    const { rows } = await executeQuery(query);
+    res.json(rows);
+  } catch (error) {
+    console.error('Error al obtener productos más vendidos:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// Obtener productos mejor calificados
+app.get('/api/reportes/productos-mejor-calificados', verificarToken, esAdmin, async (req, res) => {
+  try {
+    console.log('Petición recibida para obtener productos mejor calificados');
+    const query = `
+            SELECT 
+                p."idProduct",
+                p.nombre,
+                p.genero,
+                s."Nombre" AS seleccionNombre,
+                AVG(e.valoracion) AS promedio_estrellas,
+                COUNT(e."idStar") AS num_calificaciones,
+                (
+                    SELECT url
+                    FROM multimedia
+                    WHERE multimedia.producto = p."idProduct"
+                    ORDER BY multimedia.idmulti ASC
+                    LIMIT 1
+                ) AS img
+            FROM estrellas AS e
+            INNER JOIN producto AS p ON e.producto = p."idProduct"
+            LEFT JOIN selecciones AS s ON p.seleccion = s."idSelec"
+            WHERE p.activo = true
+            GROUP BY p."idProduct", p.nombre, p.genero, s."Nombre"
+            HAVING COUNT(e."idStar") >= 3
+            ORDER BY promedio_estrellas DESC, num_calificaciones DESC
+            LIMIT 10
+        `;
+    const { rows } = await executeQuery(query);
+    res.json(rows);
+  } catch (error) {
+    console.error('Error al obtener productos mejor calificados:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// Obtener usuarios nuevos
+app.get('/api/reportes/usuarios-nuevos', verificarToken, esAdmin, async (req, res) => {
+  try {
+    console.log('Petición recibida para obtener usuarios nuevos');
+    const query = `
+            SELECT 
+                u."idUser",
+                u.nombre,
+                u.apellidos,
+                u.correo,
+                u.telf,
+                s."Nombre" AS seleccionNombre,
+                u."created_at" AS fecha_registro,
+                COUNT(DISTINCT p."idPedido") AS num_pedidos
+            FROM usuarios AS u
+            LEFT JOIN selecciones AS s ON u.seleccion = s."idSelec"
+            LEFT JOIN pedidos AS p ON u."idUser" = p.comprador AND p.estado = 'confirmado'
+            WHERE u.admin = false
+            GROUP BY u."idUser", u.nombre, u.apellidos, u.correo, u.telf, s."Nombre", u."created_at"
+            GROUP BY u."idUser", s."Nombre"
+            ORDER BY u."created_at" DESC
+            LIMIT 20
+        `;
+    const { rows } = await executeQuery(query);
+    res.json(rows);
+  } catch (error) {
+    console.error('Error al obtener usuarios nuevos:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// Obtener usuarios con más pedidos
+app.get('/api/reportes/usuarios-mas-pedidos', verificarToken, esAdmin, async (req, res) => {
+  try {
+    console.log('Petición recibida para obtener usuarios con más pedidos');
+    const query = `
+            SELECT 
+                u."idUser",
+                u.nombre,
+                u.apellidos,
+                u.correo,
+                u.telf,
+                s."Nombre" AS seleccionNombre,
+                COUNT(DISTINCT p."idPedido") AS num_pedidos,
+                SUM(p.cantidad) AS total_productos,
+                MAX(p."created_at") AS ultimo_pedido
+            FROM usuarios AS u
+            INNER JOIN pedidos AS p ON u."idUser" = p.comprador
+            LEFT JOIN selecciones AS s ON u.seleccion = s."idSelec"
+            WHERE u.admin = false AND p.estado = 'confirmado'
+            GROUP BY u."idUser", u.nombre, u.apellidos, u.correo, u.telf, s."Nombre"
+            HAVING COUNT(DISTINCT p."idPedido") > 0
+            ORDER BY num_pedidos DESC, total_productos DESC
+            LIMIT 10
+        `;
+    const { rows } = await executeQuery(query);
+    res.json(rows);
+  } catch (error) {
+    console.error('Error al obtener usuarios con más pedidos:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
 
 // 5. Iniciar el servidor
 app.listen(port, () => {
