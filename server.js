@@ -1072,7 +1072,6 @@ app.get('/api/pedidos', verificarToken, esAdmin, async (req, res) => {
   try {
     console.log('Petición recibida para obtener todos los pedidos');
     const query = `
-            SELECT p.*, pr.nombre AS productoNombre, u.nombre AS usuarioNombre, u.apellidos AS usuarioApellidos
             SELECT 
                 p.*,
                 pr.nombre AS "productoNombre",
